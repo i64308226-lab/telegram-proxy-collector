@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# AI Analytics — работает с Groq (бесплатно) или локально
+# AI Analytics — работает с Groq (бесплатно) через OpenAI-совместимый API
 
 import os
 import json
 import re
-import requests
 from datetime import datetime
 from pathlib import Path
 from collections import Counter
+from openai import OpenAI   # <--- заменили requests
 
 DATA_DIR = Path("data")
 README_FILE = Path("README.md")
@@ -58,33 +58,26 @@ def build_prompt(history, stats):
 """
     return prompt
 
-def call_groq_api(prompt, api_key):
-    """Вызов Groq API (бесплатно)"""
-    url = "https://api.groq.com/openai/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "model": "llama-3.3-70b-versatile",
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.7,
-        "max_tokens": 500
-    }
-
+def call_openai_api(prompt, api_key):
+    """Вызов OpenAI-совместимого API Groq (бесплатно)"""
+    client = OpenAI(
+        api_key=api_key,
+        base_url="https://api.groq.com/openai/v1"
+    )
     try:
-        resp = requests.post(url, json=payload, headers=headers, timeout=30)
-        if resp.status_code == 200:
-            return resp.json()['choices'][0]['message']['content']
-        else:
-            print(f"⚠️ Ошибка Groq API: {resp.status_code} – {resp.text}")
-            return None
+        response = client.chat.completions.create(
+            model="openai/gpt-oss-120b",   # новая модель
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
+            max_tokens=500
+        )
+        return response.choices[0].message.content
     except Exception as e:
-        print(f"⚠️ Ошибка запроса к Groq: {e}")
+        print(f"⚠️ Ошибка запроса к Groq через OpenAI-клиент: {e}")
         return None
 
 def generate_local_report(history, stats):
-    """Локальная генерация (если нет API-ключа)"""
+    """Локальная генерация (если нет API-ключа или API недоступен)"""
     total = len(history)
     if total == 0:
         return "Нет данных для анализа."
@@ -114,7 +107,8 @@ def generate_local_report(history, stats):
     
     lines.append(f"\n**💡 Рекомендации:**")
     if good > 0:
-        lines.append(f"- Используйте прокси из региона **{regions.most_common(1)[0][0] if regions else 'RU'}** — они показывают лучший пинг.")
+        best_region = regions.most_common(1)[0][0] if regions else 'RU'
+        lines.append(f"- Используйте прокси из региона **{best_region}** — они показывают лучший пинг.")
     else:
         lines.append("- Рекомендуется проверить источники — хороших прокси пока нет.")
     
@@ -151,7 +145,7 @@ def update_readme_with_report(report_text):
     print("✅ README.md обновлён с аналитикой")
 
 def main():
-    # Твой секрет TELEGRAMPROXYCOLLECTOR — Groq API ключ
+    # Секрет TELEGRAMPROXYCOLLECTOR — это Groq API ключ (gsk_...)
     api_key = os.environ.get("TELEGRAMPROXYCOLLECTOR")
     
     print("🧠 Запуск AI-аналитики...")
@@ -162,14 +156,14 @@ def main():
         print("⚠️ Нет истории для анализа. Завершение.")
         return
 
-    # Если есть ключ Groq и он начинается с gsk_ — используем Groq
+    # Если есть ключ Groq
     if api_key and api_key.startswith("gsk_"):
-        print("📤 Отправка запроса к Groq API (бесплатно)...")
+        print("📤 Отправка запроса к Groq API через OpenAI-клиент...")
         prompt = build_prompt(history, stats)
-        report_text = call_groq_api(prompt, api_key)
+        report_text = call_openai_api(prompt, api_key)
         if report_text:
             update_readme_with_report(report_text)
-            print("✅ README обновлён через Groq")
+            print("✅ README обновлён через Groq (openai/gpt-oss-120b)")
             return
         else:
             print("⚠️ Groq не ответил, используем локальную генерацию...")
